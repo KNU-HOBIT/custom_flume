@@ -9,8 +9,8 @@ import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
 import com.influxdb.client.InfluxDBClient;
 
-
 import java.time.Instant;
+import java.util.Base64;
 
 public class InfluxDBSink extends AbstractSink implements Configurable {
 
@@ -29,12 +29,13 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
         char[] token = context.getString("token").toCharArray();
         String org = context.getString("org");
         String bucket = context.getString("bucket");
-        this.measurement = context.getString("measurement");
-        this.tagKey = context.getString("tagKey");
-        this.tagValue = context.getString("tagValue");
 
         this.influxDBClient = InfluxDBClientFactory.create(url, token, org, bucket);
         this.writeApi = influxDBClient.getWriteApiBlocking();
+
+        this.measurement = context.getString("measurement");
+        this.tagKey = context.getString("tagKey");
+        this.tagValue = context.getString("tagValue");
     }
 
     @Override
@@ -54,8 +55,8 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
                                 this.tagKey,
                                 this.tagValue);
 
-                String body = new String(event.getBody());
-                Point point = writer.createPoint(body);
+                String bodyBase64 = Base64.getEncoder().encodeToString(event.getBody());
+                Point point = writer.createPoint(bodyBase64);
                 writeApi.writePoint(point);
 
             } else {

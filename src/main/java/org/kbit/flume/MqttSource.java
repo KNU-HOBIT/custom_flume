@@ -1,9 +1,6 @@
 package org.kbit.flume;
 
-import org.apache.flume.Context;
-import org.apache.flume.Event;
-import org.apache.flume.EventDeliveryException;
-import org.apache.flume.PollableSource;
+import org.apache.flume.*;
 import org.apache.flume.source.AbstractSource;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.event.EventBuilder;
@@ -18,7 +15,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class MqttSource extends AbstractSource implements Configurable, PollableSource, MqttCallback {
+public class MqttSource extends AbstractSource implements Configurable, EventDrivenSource, MqttCallback {
     private static final Logger logger = LoggerFactory.getLogger(MqttSource.class);
     private MqttClient mqttClient;
     private Map<String, String> configuration;
@@ -29,7 +26,7 @@ public class MqttSource extends AbstractSource implements Configurable, Pollable
     public void configure(Context context) {
         try {
             String[] requiredConfigs = {"brokerUrl", "topic"};
-            String[] optionalConfigs = {"username", "password", "keepAliveInterval", "connectionTimeout", "cleanSession", "qos"};
+            // optionalConfigs = "username", "password", "keepAliveInterval", "connectionTimeout", "cleanSession", "qos"
 
             configuration = new HashMap<>();
 
@@ -46,32 +43,6 @@ public class MqttSource extends AbstractSource implements Configurable, Pollable
                 }
             }
 
-            for (String optional : optionalConfigs) {
-                if (!configuration.containsKey(optional)) {
-                    switch (optional) {
-                        case "keepAliveInterval":
-                            configuration.put(optional, "60");
-                            break;
-                        case "connectionTimeout":
-                            configuration.put(optional, "30");
-                            break;
-                        case "cleanSession":
-                            configuration.put(optional, "true");
-                            break;
-                        case "qos":
-                            configuration.put(optional, "1");
-                            break;
-                        case "username":
-                            configuration.put(optional, ""); // Default to an empty string
-                            break;
-                        case "password":
-                            configuration.put(optional, ""); // Default to an empty string
-                            break;
-                        default:
-                            throw new IllegalArgumentException("Unknown configuration key: " + optional);
-                    }
-                }
-            }
         } catch (Exception e) {
             logger.error("Error during configuration", e);
             throw new RuntimeException("Configuration error: " + e.getMessage(), e);
@@ -86,30 +57,42 @@ public class MqttSource extends AbstractSource implements Configurable, Pollable
 
         String brokerUrl = configuration.get("brokerUrl");
         String topic = configuration.get("topic");
-        String username = configuration.get("username");
-        String password = configuration.get("password");
-        int keepAliveInterval = Integer.parseInt(configuration.get("keepAliveInterval"));
-        int connectionTimeout = Integer.parseInt(configuration.get("connectionTimeout"));
-        boolean cleanSession = Boolean.parseBoolean(configuration.get("cleanSession"));
-        int qos = Integer.parseInt(configuration.get("qos"));
 
-        if (brokerUrl == null || topic == null || username == null || password == null) {
+        if (brokerUrl == null || topic == null) {
             throw new IllegalStateException("Required MQTT configuration parameters are missing.");
         }
+
+        // optionalConfigs = "username", "password", "keepAliveInterval", "connectionTimeout", "cleanSession", "qos"
+        String username = configuration.getOrDefault("username", null);
+        String password = configuration.getOrDefault("password", null);
+        int keepAliveInterval = configuration.containsKey("keepAliveInterval") ? Integer.parseInt(configuration.get("keepAliveInterval")) : 60;
+        int connectionTimeout = configuration.containsKey("connectionTimeout") ? Integer.parseInt(configuration.get("connectionTimeout")) : 30;
+        boolean cleanSession = !configuration.containsKey("cleanSession") || Boolean.parseBoolean(configuration.get("cleanSession"));
+        int qos = configuration.containsKey("qos") ? Integer.parseInt(configuration.get("qos")) : -1;
 
         try {
             mqttClient = new MqttClient(brokerUrl, MqttClient.generateClientId());
             mqttClient.setCallback(this);
 
             MqttConnectOptions options = new MqttConnectOptions();
-            options.setUserName(username);
-            options.setPassword(password.toCharArray());
+            if (username != null) {
+                options.setUserName(username);
+            }
+            if (password != null) {
+                options.setPassword(password.toCharArray());
+            }
             options.setKeepAliveInterval(keepAliveInterval);
             options.setConnectionTimeout(connectionTimeout);
             options.setCleanSession(cleanSession);
 
             mqttClient.connect(options);
-            mqttClient.subscribe(topic, qos);
+
+            if (qos < 0) {
+                mqttClient.subscribe(topic);
+            } else {
+                mqttClient.subscribe(topic, qos);
+            }
+
         } catch (MqttException e) {
             throw new RuntimeException("Failed to connect and subscribe to MQTT broker", e);
         }
@@ -176,18 +159,4 @@ public class MqttSource extends AbstractSource implements Configurable, Pollable
         }
     }
 
-    @Override
-    public Status process() throws EventDeliveryException {
-        return Status.BACKOFF;
-    }
-
-    @Override
-    public long getBackOffSleepIncrement() {
-        return 1000L; // 1 second
-    }
-
-    @Override
-    public long getMaxBackOffSleepInterval() {
-        return 5000L; // 5 seconds
-    }
 }
