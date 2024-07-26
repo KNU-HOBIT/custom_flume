@@ -1,13 +1,11 @@
 package org.kbit.flume;
 
-import com.influxdb.client.InfluxDBClientFactory;
-import com.influxdb.client.WriteApiBlocking;
+import com.influxdb.client.*;
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
-import com.influxdb.client.InfluxDBClient;
 
 import java.time.Instant;
 import java.util.Base64;
@@ -15,7 +13,7 @@ import java.util.Base64;
 public class InfluxDBSink extends AbstractSink implements Configurable {
 
     private InfluxDBClient influxDBClient;
-    private WriteApiBlocking writeApi;
+    private WriteApi writeApi;
     private String measurement;
     private String tagKey;
     private String tagValue;
@@ -30,8 +28,10 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
         String org = context.getString("org");
         String bucket = context.getString("bucket");
 
+        // Create the InfluxDB client
         this.influxDBClient = InfluxDBClientFactory.create(url, token, org, bucket);
-        this.writeApi = influxDBClient.getWriteApiBlocking();
+
+        this.writeApi = influxDBClient.makeWriteApi();
 
         this.measurement = context.getString("measurement");
         this.tagKey = context.getString("tagKey");
