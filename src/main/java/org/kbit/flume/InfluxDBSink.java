@@ -40,18 +40,18 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
         this.tagKey = context.getString("tagKey");
         this.tagValue = context.getString("tagValue");
 
-        // Log the configuration values at info level
-        logger.info("InfluxDBSink configured with URL: {}", url);
-        logger.info("Organization: {}", org);
-        logger.info("Bucket: {}", bucket);
-        logger.info("Measurement: {}", measurement);
-        logger.info("Tag Key: {}", tagKey);
-        logger.info("Tag Value: {}", tagValue);
+        // Log the configuration values at info level in a formatted way
+        String configLog = "InfluxDBSink configured with:\n" + "URL: " + url + "\n" +
+                "Organization: " + org + "\n" +
+                "Bucket: " + bucket + "\n" +
+                "Measurement: " + measurement + "\n" +
+                "Tag Key: " + tagKey + "\n" +
+                "Tag Value: " + tagValue + "\n";
+
+        logger.info(configLog);
 
         Utils.logGitCommitLog(logger);
     }
-
-
 
     @Override
     public Sink.Status process() throws EventDeliveryException {
