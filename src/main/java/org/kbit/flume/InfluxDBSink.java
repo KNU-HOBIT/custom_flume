@@ -1,17 +1,20 @@
 package org.kbit.flume;
 
+import org.kbit.flume.utils.Utils;
 import com.influxdb.client.*;
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.sink.AbstractSink;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.Base64;
 
 public class InfluxDBSink extends AbstractSink implements Configurable {
-
+    private static final Logger logger = LoggerFactory.getLogger(InfluxDBSink.class);
     private InfluxDBClient influxDBClient;
     private WriteApi writeApi;
     private String measurement;
@@ -36,7 +39,19 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
         this.measurement = context.getString("measurement");
         this.tagKey = context.getString("tagKey");
         this.tagValue = context.getString("tagValue");
+
+        // Log the configuration values at info level
+        logger.info("InfluxDBSink configured with URL: {}", url);
+        logger.info("Organization: {}", org);
+        logger.info("Bucket: {}", bucket);
+        logger.info("Measurement: {}", measurement);
+        logger.info("Tag Key: {}", tagKey);
+        logger.info("Tag Value: {}", tagValue);
+
+        Utils.logGitCommitLog(logger);
     }
+
+
 
     @Override
     public Sink.Status process() throws EventDeliveryException {

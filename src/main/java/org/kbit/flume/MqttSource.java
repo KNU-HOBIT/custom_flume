@@ -20,8 +20,6 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
     private MqttClient mqttClient;
     private Map<String, String> configuration;
     private ScheduledExecutorService scheduler;
-
-
     @Override
     public void configure(Context context) {
         try {
@@ -42,6 +40,10 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
                     throw new IllegalArgumentException(required + " cannot be empty");
                 }
             }
+
+            StringBuilder configLog = new StringBuilder("Configuration initialized:\n");
+            configuration.forEach((key, value) -> configLog.append(key).append(" = ").append(value).append("\n"));
+            logger.info(configLog.toString());
 
         } catch (Exception e) {
             logger.error("Error during configuration", e);
