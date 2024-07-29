@@ -60,4 +60,18 @@ public class Utils {
             return seconds + " second" + (seconds > 1 ? "s" : "") + " ago";
         }
     }
+
+    public static String extractFieldValue(String line, String fieldName) {
+        // 라인에서 특정 필드 값을 추출하는 로직 구현
+        // 예시로, 필드가 "fieldName=value" 형태로 포함된다고 가정
+        String[] fields = line.split(",");
+        for (String field : fields) {
+            if (field.startsWith(fieldName + "=")) {
+                return field.split("=")[1];
+            }
+        }
+        return "unknown";
+    }
+
+
 }
