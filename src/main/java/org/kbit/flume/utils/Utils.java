@@ -61,17 +61,24 @@ public class Utils {
         }
     }
 
+    /**
+     * Extracts the value of a specified field from a given line.
+     * The field is expected to be in the format: fieldName="value".
+     *
+     * @param line The line from which to extract the field value.
+     * @param fieldName The name of the field to extract.
+     * @return The value of the specified field, or "unknown" if the field is not found.
+     */
     public static String extractFieldValue(String line, String fieldName) {
-        // 라인에서 특정 필드 값을 추출하는 로직 구현
-        // 예시로, 필드가 "fieldName=value" 형태로 포함된다고 가정
-        String[] fields = line.split(",");
-        for (String field : fields) {
-            if (field.startsWith(fieldName + "=")) {
-                return field.split("=")[1];
+        String searchPattern = fieldName + "=\"";
+        int startIndex = line.indexOf(searchPattern);
+        if (startIndex != -1) {
+            int endIndex = line.indexOf("\"", startIndex + searchPattern.length());
+            if (endIndex != -1) {
+                return line.substring(startIndex + searchPattern.length(), endIndex);
             }
         }
         return "unknown";
     }
-
 
 }

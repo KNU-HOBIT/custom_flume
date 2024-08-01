@@ -16,8 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class MqttSource extends AbstractSource implements Configurable, EventDrivenSource, MqttCallback {
-    protected static final Logger logger = LoggerFactory.getLogger(MqttSource.class);
-    private ScheduledExecutorService scheduler;
+    protected final Logger logger = LoggerFactory.getLogger(MqttSource.class);
+    protected ScheduledExecutorService scheduler;
     protected MqttClient mqttClient;
     protected MqttConfiguration mqttConfiguration;
 
@@ -45,35 +45,41 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
 
     @Override
     public synchronized void start() {
-        if (this.mqttConfiguration == null) {
-            throw new IllegalStateException("MQTT configuration is not properly set. Make sure configure() is called before start().");
-        }
 
-        logConfiguration();
+        this.mqttClient = connectAndSubscribe(this.mqttConfiguration, this.mqttConfiguration.getTopic());
 
-        connectAndSubscribe(this.mqttConfiguration);
+        this.scheduler = startConnectionCheckScheduler(this.mqttClient, this.logger);
 
-        this.scheduler = Executors.newScheduledThreadPool(1);
-        this.scheduler.scheduleAtFixedRate(this::checkConnection, 0, 10, TimeUnit.SECONDS);
+        this.logConfiguration();
 
         super.start();
     }
 
+    public ScheduledExecutorService startConnectionCheckScheduler(MqttClient client, Logger logger) {
+        scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(() -> checkConnection(client, logger), 0, 10, TimeUnit.SECONDS);
+        return scheduler;
+    }
 
-    private void connectAndSubscribe(MqttConfiguration config) {
+
+    protected MqttClient connectAndSubscribe(MqttConfiguration config, String topic) {
         try {
-            this.mqttClient = new MqttClient(config.getBrokerUrl(), MqttClient.generateClientId());
-            this.mqttClient.setCallback(this);
+            MqttClient mqttClient = new MqttClient(config.getBrokerUrl(), MqttClient.generateClientId());
+            mqttClient.setCallback(this);
 
             MqttConnectOptions options = getMqttConnectOptions(config);
 
-            this.mqttClient.connect(options);
+            mqttClient.connect(options);
+
+            if (topic.isEmpty()) { return mqttClient; }
 
             if (config.getQos() == 0) {
-                this.mqttClient.subscribe(config.getTopic());
+                mqttClient.subscribe(topic);
             } else {
-                this.mqttClient.subscribe(config.getTopic(), config.getQos());
+                mqttClient.subscribe(topic, config.getQos());
             }
+
+            return mqttClient;
 
         } catch (MqttException e) {
             throw new RuntimeException("Failed to connect and subscribe to MQTT broker", e);
@@ -107,10 +113,6 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
         }
     }
 
-    // 새로운 getMqttClient 메서드 추가
-    protected MqttClient getMqttClient() {
-        return mqttClient;
-    }
     @Override
     public synchronized void stop() {
         try {
@@ -127,23 +129,20 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
         super.stop();
     }
     @Override
-    public void connectionLost(Throwable cause) {
-        logger.error("MQTT connection lost", cause);
-        checkConnection();
-    }
+    public void connectionLost(Throwable cause) {}
 
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {
         // Not used in this context
     }
 
-    private void checkConnection() {
-        logger.info("Check connection ...");
-        if (this.mqttClient == null) return;
+    private void checkConnection(MqttClient client, Logger logger) {
+        logger.info("Check connection about "+client+" ...");
+        if (client == null) return;
 
-        if (!this.mqttClient.isConnected()) {
+        if (!client.isConnected()) {
             try {
-                this.mqttClient.reconnect();
+                client.reconnect();
                 logger.info("Reconnected to MQTT broker");
             } catch (MqttException e) {
                 logger.error("Failed to reconnect to MQTT broker", e);
@@ -162,7 +161,7 @@ public class MqttSource extends AbstractSource implements Configurable, EventDri
     }
 
     public void logConfiguration() {
-        logger.info(this.mqttConfiguration.toString());
+        this.logger.info(this.mqttConfiguration.toString());
     }
 
 }

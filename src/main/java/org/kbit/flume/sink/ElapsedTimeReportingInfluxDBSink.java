@@ -61,6 +61,8 @@ public class ElapsedTimeReportingInfluxDBSink extends InfluxDBSink {
         this.logger.info(super.influxDBConfig.toString());
 
         logger.info(kafkaProdConfig.toString());
+        logger.info("Source - Sink Elapsed 딜레이용 토픽 : " + topic1);
+        logger.info("DB write - Success Callback Elapsed 딜레이용 토픽 : " + topic2);
 
         Utils.logGitCommitLog(this.logger);
 
@@ -90,7 +92,7 @@ public class ElapsedTimeReportingInfluxDBSink extends InfluxDBSink {
                 txn.commit();
                 return Status.READY;
             } else {
-                txn.rollback();
+                txn.commit();
                 return Status.BACKOFF;
             }
         } catch (ChannelException e) {

@@ -1,6 +1,6 @@
 package org.kbit.flume.conf;
 
-public class MqttConfiguration {
+public class MqttConfiguration implements Cloneable {
     private String brokerUrl;
     private String topic;
     private String username;
@@ -84,6 +84,11 @@ public class MqttConfiguration {
         this.returnTopic = returnTopic;
     }
 
+    @Override
+    public Object clone() throws CloneNotSupportedException {
+        return super.clone();
+    }
+
     // Method to get configuration value by key
     public String get(String key) {
         switch (key) {
@@ -112,8 +117,8 @@ public class MqttConfiguration {
     public String toString() {
         return "MqttConfiguration configured with:\n" +
                 "Broker URL: " + getBrokerUrl() + "\n" +
-                "Topic: " + getTopic() + "\n" +
                 "Return Topic: " + getReturnTopic() + "\n" +
+                "Topic: " + getTopic() + "\n" +
                 "Username: " + getUsername() + "\n" +
                 "Password: " + getPassword() + "\n" +
                 "Keep Alive Interval: " + getKeepAliveInterval() + "\n" +
@@ -121,4 +126,5 @@ public class MqttConfiguration {
                 "Clean Session: " + isCleanSession() + "\n" +
                 "QoS: " + getQos() + "\n";
     }
+
 }
