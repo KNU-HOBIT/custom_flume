@@ -106,5 +106,4 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
         this.influxDBClient.close();
         super.stop();
     }
-
 }
