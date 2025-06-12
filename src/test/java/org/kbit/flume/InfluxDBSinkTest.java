@@ -9,6 +9,10 @@ import org.junit.Before;
 import org.junit.Test;
 import org.kbit.flume.sink.InfluxDBSink;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -18,20 +22,34 @@ public class InfluxDBSinkTest {
     private Context context;
     private Channel channel;
 
+
+    private static final Properties properties = new Properties();
+
+    static {
+        try (InputStream input = InfluxDBSinkTest.class.getClassLoader().getResourceAsStream("config.properties")) {
+            if (input == null) {
+                throw new RuntimeException("Unable to find config.properties");
+            }
+            properties.load(input);
+        } catch (IOException e) {
+            throw new RuntimeException("Error loading config.properties", e);
+        }
+    }
+
     @Before
     public void setUp() {
         sink = new InfluxDBSink();
         context = new Context();
         channel = new MemoryChannel();
 
-        // InfluxDB 연결 정보 설정
-        context.put("url", "http://155.230.35.213:32145");
-        context.put("token", "auyiYKUAAhTJLVBv20i2yCwVwmUA5lGJ");
-        context.put("org", "influxdata");
-        context.put("bucket", "default");
-        context.put("measurement", "test_measurement");
-        context.put("tagKey", "test_tagKey");
-        context.put("tagValue", "123123");
+        // InfluxDB 연결 정보 설정 - properties에서 읽어서 context에 넣기
+        context.put("url", properties.getProperty("InfluxDBSinkTest.url"));
+        context.put("token", properties.getProperty("InfluxDBSinkTest.token"));
+        context.put("org", properties.getProperty("InfluxDBSinkTest.org"));
+        context.put("bucket", properties.getProperty("InfluxDBSinkTest.bucket"));
+        context.put("measurement", properties.getProperty("InfluxDBSinkTest.measurement"));
+        context.put("tagKey", properties.getProperty("InfluxDBSinkTest.tagKey"));
+        context.put("tagValue", properties.getProperty("InfluxDBSinkTest.tagValue"));
     }
 
     @Test

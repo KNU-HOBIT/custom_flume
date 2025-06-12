@@ -13,11 +13,14 @@ import org.kbit.flume.source.MqttSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.io.InputStream;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.awaitility.Awaitility.*;
@@ -33,15 +36,36 @@ public class MqttSourceTest {
     private MqttClient testClient;
     private ExecutorService executorService;
 
-    // Configuration constants
-    private static final String BROKER_URL = "tcp://155.230.35.213:30083";
-    private static final String TOPIC = "test/flume/source/" + System.currentTimeMillis(); // Unique topic per test run
-    private static final String USERNAME = "admin";
-    private static final String PASSWORD = "dacslab522";
-    private static final int THREAD_POOL_SIZE = 1; // Reduced to 1 to avoid duplicate processing
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration MESSAGE_PROCESSING_TIMEOUT = Duration.ofSeconds(8);
+    // Configuration constants - loaded from config.properties
+    private static final String BROKER_URL;
+    private static final String TOPIC;
+    private static final String USERNAME;
+    private static final String PASSWORD;
+    private static final int THREAD_POOL_SIZE;
+    private static final Duration DEFAULT_TIMEOUT;
+    private static final Duration MESSAGE_PROCESSING_TIMEOUT;
 
+    static {
+        Properties properties = new Properties();
+        try (InputStream input = MqttSourceTest.class.getClassLoader().getResourceAsStream("config.properties")) {
+            if (input == null) {
+                throw new RuntimeException("Unable to find config.properties");
+            }
+            properties.load(input);
+
+            // Initialize constants from properties
+            BROKER_URL = properties.getProperty("MqttSourceTest.broker.url");
+            TOPIC = properties.getProperty("MqttSourceTest.topic.prefix") + System.currentTimeMillis();
+            USERNAME = properties.getProperty("MqttSourceTest.username");
+            PASSWORD = properties.getProperty("MqttSourceTest.password");
+            THREAD_POOL_SIZE = Integer.parseInt(properties.getProperty("MqttSourceTest.thread.pool.size"));
+            DEFAULT_TIMEOUT = Duration.ofSeconds(Long.parseLong(properties.getProperty("MqttSourceTest.default.timeout.seconds")));
+            MESSAGE_PROCESSING_TIMEOUT = Duration.ofSeconds(Long.parseLong(properties.getProperty("MqttSourceTest.message.processing.timeout.seconds")));
+
+        } catch (IOException e) {
+            throw new RuntimeException("Error loading config.properties", e);
+        }
+    }
     @BeforeEach
     public void setup() throws Exception {
         logger.info("Setting up MqttSourceTest...");
