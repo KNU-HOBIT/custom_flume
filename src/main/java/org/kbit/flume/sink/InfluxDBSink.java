@@ -57,8 +57,8 @@ public class InfluxDBSink extends AbstractSink implements Configurable {
     }
 
 
-    @Override
-    public Sink.Status process() throws EventDeliveryException {
+        @Override
+        public Sink.Status process() throws EventDeliveryException {
         Sink.Status result = Status.READY;
         Channel channel = this.getChannel();
         Transaction transaction = channel.getTransaction();

@@ -7,15 +7,20 @@ import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.kbit.flume.conf.MqttConfiguration;
-import org.kbit.flume.utils.AckResult;
+import org.kbit.flume.utils.MessageTuple;
+import org.kbit.flume.utils.MqttSourceClient;
+import org.kbit.flume.utils.MqttSourceClientPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
-public class ElapsedTimeReportingMqttSource extends MqttSource{
+public class ElapsedTimeReportingMqttSource extends MqttSource {
     /**
      * This class extends MqttSource and handles receiving, acknowledging, and timestamping messages
      * from an MQTT broker before forwarding them as Flume events.<p>
@@ -27,113 +32,167 @@ public class ElapsedTimeReportingMqttSource extends MqttSource{
      */
     private final Logger logger = LoggerFactory.getLogger(ElapsedTimeReportingMqttSource.class);
 
-    private ScheduledExecutorService scheduler;
-
-    private MqttClient mqttClient4Ack;
-    private MqttConfiguration mqttConfiguration;
+    // Pool for ACK clients (separate from the main receiving clients)
+    private MqttSourceClientPool ackClientPool;
+    private MqttConfiguration ackMqttConfiguration;
+    private ExecutorService ackExecutorService;
+    private int threadPoolSize;
 
     @Override
     public void configure(Context context) {
         String returnTopic = context.getString("returnTopic");
         String brokerUrl4Send = context.getString("brokerUrl4Send");
+        this.threadPoolSize = context.getInteger("threadPoolSize", 1);
+
         if (returnTopic == null || returnTopic.isEmpty() || brokerUrl4Send == null || brokerUrl4Send.isEmpty()) {
             throw new IllegalArgumentException("returnTopic & sendBrokerUrl cannot be null or empty");
         }
+
+        // Configure the parent class first
         super.configure(context);
 
-        // mqttConfiguration의 깊은 복사 수행
         try {
-            this.mqttConfiguration = (MqttConfiguration) super.mqttConfiguration.clone();
+            // Create separate configuration for ACK clients
+            this.ackMqttConfiguration = (MqttConfiguration) super.mqttConfiguration.clone();
+            this.ackMqttConfiguration.setReturnTopic(returnTopic);
+            this.ackMqttConfiguration.setBrokerUrl(brokerUrl4Send);
+            // ACK clients don't need to subscribe to any topic (empty topic)
+            this.ackMqttConfiguration.setTopic("");
+
         } catch (CloneNotSupportedException e) {
             throw new RuntimeException("Clone not supported for mqttConfiguration", e);
         }
-        this.mqttConfiguration.setReturnTopic(returnTopic);
-        this.mqttConfiguration.setBrokerUrl(brokerUrl4Send);
 
+        // Initialize executor service for ACK operations
+        this.ackExecutorService = Executors.newFixedThreadPool(threadPoolSize);
     }
 
     @Override
-    public void start() {
-        // mqttClient4Ack 설정 및 연결 & 연결 체크 스케줄러 시작
-        this.mqttClient4Ack = connectAndSubscribe(this.mqttConfiguration, "");
-        this.scheduler = startConnectionCheckScheduler(this.mqttClient4Ack, this.logger);
-        this.logConfiguration();
+    public synchronized void start() {
+        // Start the parent class (this will create the receiving client pool)
+        super.start();
 
-        ////////////////////
-        super.mqttConfiguration.setBrokerUrl(super.mqttConfiguration.getBrokerUrl());
-        super.mqttClient = connectAndSubscribe(super.mqttConfiguration, super.mqttConfiguration.getTopic());
-        super.scheduler = startConnectionCheckScheduler(super.mqttClient, super.logger);
-        super.logConfiguration();
+        try {
+            // Create the ACK client pool (no callback needed as these are for publishing only)
+            this.ackClientPool = new MqttSourceClientPool(threadPoolSize, ackMqttConfiguration, logger);
+
+            logger.info("ElapsedTimeReportingMqttSource started with {} ACK clients", threadPoolSize);
+            this.logConfiguration();
+
+        } catch (Exception e) {
+            logger.error("Failed to start ElapsedTimeReportingMqttSource", e);
+            throw new RuntimeException("Failed to start ElapsedTimeReportingMqttSource", e);
+        }
     }
 
     @Override
     public void messageArrived(String topic, MqttMessage message) throws Exception {
-        // Add a timestamp to the event
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Get the next available ACK client from the pool
+                MqttSourceClient ackSourceClient = ackClientPool.getNextSourceClient();
+                MqttClient ackClient = ackSourceClient.getMqttClient();
 
-        AckResult result = extractMessageContentAndSendAck(this.mqttConfiguration.getReturnTopic(), message);
-        Event event = createEventWithTimestamp(result);
-        // Process the event
-        getChannelProcessor().processEvent(event);
-        logger.debug("Message arrived from topic " + topic + ": " + result.getMessageID());
+                processMessage(topic, message, ackClient);
+
+            } catch (Exception e) {
+                logger.error("Error processing message in ElapsedTimeReportingMqttSource", e);
+            }
+        }, ackExecutorService);
     }
 
-    private AckResult extractMessageContentAndSendAck(String returnTopic, MqttMessage receivedMessage) {
-        if (returnTopic == null || returnTopic.isEmpty()) {
+    private void processMessage(String topic, MqttMessage message, MqttClient mqttClient4Ack) {
+        try {
+            MessageTuple tuple = extractMessage(message);
+            sendSimpleAck(tuple.getMessageID(), mqttClient4Ack);
+            Event event = createEventWithTimestamp(tuple);
+            getChannelProcessor().processEvent(event);
+            logger.debug("Message processed from topic {}: {}", topic, tuple.getMessageID());
+        } catch (Exception e) {
+            logger.error("Error processing message", e);
+        }
+    }
+
+    // Method to extract message ID and data as a Map
+    private MessageTuple extractMessage(MqttMessage receivedMessage) {
+        // Convert the payload to a string
+        String payload = new String(receivedMessage.getPayload());
+
+        // Split the payload into two parts
+        String[] result = payload.split("\\|", 2);
+
+        // Initialize the message ID and data
+        String messageID = result[0];
+        byte[] data;
+
+        // Ensure the payload has at least two parts after splitting
+        if (result.length == 2) {
+            data = result[1].getBytes(); // Convert the remaining data to bytes
+        } else {
+            // Handle the case where the payload does not have both parts
+            data = new byte[0]; // No data if the delimiter is not present
+        }
+
+        // Return a new MessageTuple containing the extracted parts
+        return new MessageTuple(messageID, data);
+    }
+
+    private void sendSimpleAck(String messageID, MqttClient mqttClient4Ack) {
+        if (this.ackMqttConfiguration.getReturnTopic() == null || this.ackMqttConfiguration.getReturnTopic().isEmpty()) {
             logger.warn("Return topic is not set. Skipping ACK.");
-            return new AckResult(null, new byte[0]);
+            return;
         }
         try {
-            // 수신한 메시지에서 메시지 ID와 createdTime를 추출 (구분자 "|"를 사용하여 분리)
-            String payload = new String(receivedMessage.getPayload());
-            String[] parts = payload.split("\\|", 3);
-            if (parts.length < 3) {
-                logger.error("Invalid message format: " + payload);
-                return new AckResult(null, new byte[0]);
-            }
-
-            String messageID = parts[0];
-            String createdTime = parts[1];
-
-            // 메시지 ID와 createdTime 을 구분자로 구분하여 전송
-            String ackPayload = messageID + "|" + createdTime;
-            MqttMessage ackMessage = new MqttMessage(ackPayload.getBytes());
-
-            this.mqttClient4Ack.publish(returnTopic, ackMessage);
-
-            logger.debug("Sent ACK to return topic: " + returnTopic + " with message ID: " + messageID + " and createdTime: " + createdTime);
-            return new AckResult(messageID, parts[2].getBytes());
+            mqttClient4Ack.publish(this.ackMqttConfiguration.getReturnTopic(), new MqttMessage(messageID.getBytes()));
+            logger.debug("Sent ACK to return topic: {} with message ID: {}",
+                    this.ackMqttConfiguration.getReturnTopic(), messageID);
         } catch (MqttException e) {
-            logger.error("Failed to send ACK to return topic: " + returnTopic, e);
+            logger.error("Failed to send ACK to return topic: {}", this.ackMqttConfiguration.getReturnTopic(), e);
         }
-        return new AckResult(null, new byte[0]);
     }
 
-    private Event createEventWithTimestamp(AckResult result) {
+    private Event createEventWithTimestamp(MessageTuple tuple) {
         Map<String, String> headers = new HashMap<>();
         headers.put("timestamp", String.valueOf(System.currentTimeMillis()));
-        headers.put("msgId", result.getMessageID());
-        return EventBuilder.withBody(result.getMessageContent(), headers);
+        headers.put("msgId", tuple.getMessageID());
+        return EventBuilder.withBody(tuple.getData(), headers);
     }
 
     @Override
     public synchronized void stop() {
         try {
-            if (this.mqttClient4Ack != null && this.mqttClient4Ack.isConnected()) {
-                this.mqttClient4Ack.disconnect();
-                logger.info("Disconnected from MQTT broker");
+            // Shutdown the ACK client pool
+            if (ackClientPool != null) {
+                ackClientPool.shutdownPool();
+                logger.info("ACK client pool shut down successfully");
             }
-            if (this.scheduler != null && !this.scheduler.isShutdown()) {
-                this.scheduler.shutdown();
+
+            // Shutdown the ACK executor service
+            if (ackExecutorService != null && !ackExecutorService.isShutdown()) {
+                ackExecutorService.shutdown();
+                try {
+                    if (!ackExecutorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                        ackExecutorService.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    ackExecutorService.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+                logger.info("ACK executor service shut down successfully");
             }
-        } catch (MqttException e) {
-            logger.error("Failed to stop MQTT client", e);
+
+        } catch (Exception e) {
+            logger.error("Error during ElapsedTimeReportingMqttSource shutdown", e);
         }
+
+        // Call the superclass stop method (this will handle the receiving client pool)
         super.stop();
     }
 
     @Override
     public void logConfiguration() {
-        this.logger.info(this.mqttConfiguration.toString());
+        super.logConfiguration();
+        logger.info("ACK MQTT Configuration: {}", this.ackMqttConfiguration.toString());
+        logger.info("ACK client pool size: {}", this.threadPoolSize);
     }
-
 }
